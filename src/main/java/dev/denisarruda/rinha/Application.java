@@ -9,7 +9,6 @@ import java.util.concurrent.Executors;
 public class Application {
 
     static final System.Logger LOGGER = System.getLogger(Application.class.getName());
-    static final String FRAUD_SCORE_RESPONSE = "{\"approved\":false,\"fraud_score\":0.8}";
 
     public static void main(String[] args) throws IOException {
         var server = HttpServer.create(new InetSocketAddress(8080), 0);
@@ -34,7 +33,9 @@ public class Application {
         var requestBody = new String(exchange.getRequestBody().readAllBytes());
         var input = FraudRequestParser.parse(requestBody);
         var features = Normalizer.normalize(input);
-        var body = FRAUD_SCORE_RESPONSE.getBytes();
+        var fraudScore = FraudScorer.score(features);
+        var approved = fraudScore < 0.6f;
+        var body = ("{\"approved\":" + approved + ",\"fraud_score\":" + fraudScore + "}").getBytes();
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, body.length);
         exchange.getResponseBody().write(body);
