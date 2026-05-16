@@ -21,7 +21,7 @@ docker compose up
 
 ## Architecture
 
-Minimal plain Java HTTP server — no frameworks, no external dependencies. Everything lives in `Application.java`.
+Minimal plain Java HTTP server — no frameworks, no external dependencies.
 
 - `HttpServer` (JDK built-in `com.sun.net.httpserver`) listens on port 8080.
 - Two instances (`api1`, `api2`) run behind **nginx** on port 9999, load-balanced via a round-robin upstream.
@@ -33,7 +33,7 @@ Minimal plain Java HTTP server — no frameworks, no external dependencies. Ever
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/ready` | Health/readiness check — returns 200 |
-| POST | `/fraud-score` | Always returns `{"approved":false,"fraud_score":0.8}` |
+| POST | `/fraud-score` | Returns `{"approved": <bool>, "fraud_score": <float>}` |
 
 ### `POST /fraud-score` — Request payload
 
@@ -88,9 +88,15 @@ Minimal plain Java HTTP server — no frameworks, no external dependencies. Ever
 | `last_transaction.timestamp` | string (ISO) | UTC timestamp of the previous transaction |
 | `last_transaction.km_from_current` | number | Distance in km between the previous and current transaction |
 
+### Scoring pipeline
+
+1. `FraudRequestParser.java` — parses the JSON body into a typed record.
+2. `Normalizer.java` — maps the record to a `float[14]` feature vector using constants from `NormalizationConstants.java`. `clamp(x)` keeps values in [0.0, 1.0].
+3. `FraudScorer.java` — receives the vector and returns a `float` fraud score in [0, 1]. `approved = score < 0.6`.
+
 ### Normalization
 
-Request fields are normalized into a `float[14]` feature vector (`Normalizer.java`) using constants from `NormalizationConstants.java`. `clamp(x)` keeps values in [0.0, 1.0].
+| # | Feature | Formula |
 
 | # | Feature | Formula |
 |---|---------|---------|
@@ -137,5 +143,3 @@ Request fields are normalized into a `float[14]` feature vector (`Normalizer.jav
 | 5999 | 0.50 |
 
 MCCs fora da tabela retornam `0.5`.
-
-Response: `{"approved": <bool>, "fraud_score": <float 0–1>}`
