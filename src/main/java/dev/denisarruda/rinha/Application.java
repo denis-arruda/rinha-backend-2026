@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.concurrent.Executors;
 
 public class Application {
 
@@ -12,6 +13,7 @@ public class Application {
 
     public static void main(String[] args) throws IOException {
         var server = HttpServer.create(new InetSocketAddress(8080), 0);
+        server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         server.createContext("/ready", Application::ready);
         server.createContext("/fraud-score", Application::fraudScore);
         server.start();
@@ -29,6 +31,9 @@ public class Application {
             exchange.close();
             return;
         }
+        var requestBody = new String(exchange.getRequestBody().readAllBytes());
+        var input = FraudRequestParser.parse(requestBody);
+        var features = Normalizer.normalize(input);
         var body = FRAUD_SCORE_RESPONSE.getBytes();
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, body.length);
