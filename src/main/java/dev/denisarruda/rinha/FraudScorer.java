@@ -21,7 +21,6 @@ import java.io.StreamTokenizer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 
 class FraudScorer {
 
@@ -41,11 +40,12 @@ class FraudScorer {
 
         try {
             loadFromResource(vectors, labelList);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            throw new ExceptionInInitializerError(e);
         }
 
         if (vectors.isEmpty()) {
-            loadSynthetic(vectors, labelList);
+            throw new ExceptionInInitializerError("references.json not found or is empty");
         }
 
         LABELS = new float[labelList.size()];
@@ -58,7 +58,7 @@ class FraudScorer {
 
     private static void loadFromResource(List<VectorFloat<?>> vecs, List<Float> lbls) throws IOException {
         var is = FraudScorer.class.getResourceAsStream("/references.json");
-        if (is == null) return;
+        if (is == null) throw new IOException("references.json not found in classpath");
         try (var r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8), 1 << 16)) {
             var st = new StreamTokenizer(r);
             st.resetSyntax();
@@ -93,43 +93,6 @@ class FraudScorer {
         }
     }
 
-    private static void loadSynthetic(List<VectorFloat<?>> vectors, List<Float> labelList) {
-        float[][] legitProtos = {
-            {0.05f, 0.08f, 0.10f, 0.48f, 0.33f,  0.28f,  0.02f, 0.02f, 0.05f, 0f, 1f, 0f, 0.15f, 0.03f},
-            {0.03f, 0.08f, 0.08f, 0.39f, 0.14f,  0.35f,  0.01f, 0.03f, 0.05f, 0f, 1f, 0f, 0.20f, 0.02f},
-            {0.04f, 0.08f, 0.12f, 0.87f, 0.28f,  0.22f,  0.02f, 0.05f, 0.10f, 0f, 1f, 0f, 0.30f, 0.04f},
-            {0.08f, 0.25f, 0.15f, 0.48f, 0.57f,  0.42f,  0.00f, 0.00f, 0.15f, 1f, 0f, 0f, 0.25f, 0.08f},
-            {0.15f, 0.33f, 0.18f, 0.61f, 0.42f, -1.00f, -1.00f, 0.05f, 0.05f, 0f, 1f, 0f, 0.25f, 0.12f},
-            {0.03f, 0.08f, 0.07f, 0.74f, 0.14f,  0.18f,  0.04f, 0.08f, 0.10f, 0f, 1f, 0f, 0.30f, 0.03f},
-            {0.20f, 0.17f, 0.25f, 0.39f, 0.00f,  0.52f,  0.00f, 0.00f, 0.10f, 1f, 0f, 0f, 0.35f, 0.18f},
-            {0.02f, 0.08f, 0.05f, 0.57f, 0.71f,  0.38f,  0.00f, 0.00f, 0.20f, 1f, 0f, 0f, 0.25f, 0.02f},
-        };
-        float[][] fraudProtos = {
-            {0.55f, 0.08f, 0.85f, 0.13f, 0.42f, 0.05f, 0.00f, 0.00f, 0.55f, 1f, 0f, 1f, 0.85f, 0.45f},
-            {0.35f, 0.17f, 0.60f, 0.30f, 0.28f, 0.10f, 0.70f, 0.85f, 0.40f, 0f, 1f, 1f, 0.50f, 0.30f},
-            {0.40f, 0.08f, 0.55f, 0.04f, 0.14f, 0.02f, 0.95f, 0.60f, 0.30f, 0f, 1f, 1f, 0.45f, 0.35f},
-            {0.30f, 0.08f, 0.50f, 0.04f, 0.57f, 0.03f, 0.40f, 0.40f, 0.90f, 1f, 0f, 1f, 0.80f, 0.25f},
-            {0.70f, 0.08f, 0.95f, 0.22f, 0.42f, 0.15f, 0.30f, 0.50f, 0.20f, 1f, 0f, 1f, 0.60f, 0.50f},
-            {0.25f, 0.08f, 0.40f, 0.04f, 0.28f, 0.08f, 0.00f, 0.00f, 0.45f, 1f, 0f, 1f, 0.75f, 0.20f},
-            {0.03f, 0.08f, 0.06f, 0.17f, 0.28f, 0.03f, 0.10f, 0.25f, 0.95f, 0f, 1f, 1f, 0.50f, 0.03f},
-            {0.45f, 0.08f, 0.70f, 0.09f, 0.14f, 0.06f, 0.80f, 0.75f, 0.35f, 1f, 0f, 1f, 0.85f, 0.40f},
-        };
-
-        var rng = new Random(42L);
-        for (float[] proto : legitProtos) {
-            for (int i = 0; i < 5; i++) {
-                vectors.add(vts.createFloatVector(vary(proto, rng, 0.04f)));
-                labelList.add(0.0f);
-            }
-        }
-        for (float[] proto : fraudProtos) {
-            for (int i = 0; i < 5; i++) {
-                vectors.add(vts.createFloatVector(vary(proto, rng, 0.04f)));
-                labelList.add(1.0f);
-            }
-        }
-    }
-
     private static ImmutableGraphIndex buildIndex(RandomAccessVectorValues ravv) {
         var bsp = BuildScoreProvider.randomAccessScoreProvider(ravv, SIMILARITY);
         try (var builder = new GraphIndexBuilder(bsp, DIMENSION, 16, 100, 1.2f, 1.2f, true, true)) {
@@ -153,12 +116,4 @@ class FraudScorer {
         return fraudCount / (float) TOP_K;
     }
 
-    private static float[] vary(float[] proto, Random rng, float noise) {
-        float[] v = proto.clone();
-        for (int i = 0; i < v.length; i++) {
-            if (v[i] < 0f || i == 9 || i == 10 || i == 11) continue;
-            v[i] = Math.max(0f, Math.min(1f, v[i] + (float) (rng.nextGaussian() * noise)));
-        }
-        return v;
-    }
 }
