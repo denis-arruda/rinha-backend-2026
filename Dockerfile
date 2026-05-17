@@ -13,7 +13,7 @@ RUN jdeps --ignore-missing-deps --print-module-deps /app/app.jar \
       --no-man-pages \
       --strip-debug \
       --compress zip-6 \
-      --add-modules "$(cat /modules.txt)" \
+      --add-modules "$(cat /modules.txt),jdk.incubator.vector" \
       --output /custom-jre
 
 FROM debian:bookworm-slim
@@ -22,4 +22,4 @@ COPY --from=jlink /custom-jre /opt/java
 COPY --chown=app:app --from=build /app/target/rinha-backend-2026-1.0-SNAPSHOT.jar /app/app.jar
 USER app
 EXPOSE 8080
-ENTRYPOINT ["/opt/java/bin/java", "-cp", "/app/app.jar", "dev.denisarruda.rinha.Application"]
+ENTRYPOINT ["/opt/java/bin/java", "--add-modules", "jdk.incubator.vector", "-Xmx2g", "-cp", "/app/app.jar", "dev.denisarruda.rinha.Application"]

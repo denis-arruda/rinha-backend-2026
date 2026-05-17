@@ -11,6 +11,7 @@ public class Application {
     static final System.Logger LOGGER = System.getLogger(Application.class.getName());
 
     public static void main(String[] args) throws IOException {
+        FraudScorer.init();
         var server = HttpServer.create(new InetSocketAddress(8080), 0);
         server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         server.createContext("/ready", Application::ready);
