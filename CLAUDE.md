@@ -8,13 +8,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build (produces fat jar via maven-shade-plugin)
 ./mvnw package -DskipTests
 
-# Run locally (after build) — 2 GB heap required for the reference dataset
+# Build index locally (required before running locally; needs references.json.gz in project root)
 java --add-modules jdk.incubator.vector -Xmx2g \
+  -cp target/rinha-backend-2026-1.0-SNAPSHOT.jar dev.denisarruda.rinha.IndexBuilder \
+  references.json.gz /app/index.bin /app/labels.bin
+
+# Run locally (after building the index above)
+java --add-modules jdk.incubator.vector --enable-preview -Xmx512m \
   -cp target/rinha-backend-2026-1.0-SNAPSHOT.jar dev.denisarruda.rinha.Application
 
-# Build Docker image
-# Use --platform linux/amd64 when building on non-amd64 machines (e.g. Apple Silicon)
-docker build --platform linux/amd64 -t rinha-backend-2026:latest .
+# Build Docker image (includes index build — takes ~6 min on first run, cached after)
+docker build -t rinha-backend-2026:latest .
 
 # Run with docker-compose (starts api1, api2, nginx)
 docker compose up
@@ -26,13 +30,19 @@ Minimal plain Java HTTP server with JVector-based fraud scoring.
 
 - `HttpServer` (JDK built-in `com.sun.net.httpserver`) listens on port 8080.
 - Two instances (`api1`, `api2`) run behind **nginx** on port 9999, load-balanced via a round-robin upstream.
-- The Dockerfile is a three-stage build: Maven compiles the fat jar → `jlink` produces a custom JRE → `debian:bookworm-slim` runs the minimal image.
+- The Dockerfile is a four-stage build: Maven compiles the fat jar → `IndexBuilder` generates the pre-built index → `jlink` produces a custom JRE → `debian:bookworm-slim` runs the minimal image.
 - Java 26 (`maven.compiler.release=26`).
-- Dependencies: `io.github.jbellis:jvector:4.0.0-rc.8` (vector search), `slf4j-simple` (logging). Bundled via `maven-shade-plugin` into a single fat jar (~56 MB including the reference dataset).
+- Dependencies: `io.github.jbellis:jvector:4.0.0-rc.8` (vector search), `slf4j-simple` (logging). Bundled via `maven-shade-plugin` into a single fat jar (~9 MB).
 
 ### Startup
 
-`FraudScorer.init()` is called in `Application.main()` **before** the HTTP server starts. It loads `src/main/resources/references.json` (~3 M labeled transaction vectors) and builds an in-memory JVector HNSW index. This takes ~3 minutes and requires ~2 GB heap. `/ready` only responds after this completes.
+`FraudScorer.init()` is called in `Application.main()` **before** the HTTP server starts. It memory-maps the pre-built `OnDiskGraphIndex` from `/app/index.bin` (~380 MB) and loads labels from `/app/labels.bin` (~11 MB). Startup takes **~1 second** and requires **512 MB heap** (OS manages vector pages via mmap). `/ready` only responds after this completes.
+
+### Build-time index generation
+
+`IndexBuilder` runs once during `docker build` (the `index-builder` stage). It reads `references.json.gz` (~48 MB, 3 M records), builds the HNSW graph in-memory (~6 min, 2 GB heap), and writes:
+- `/app/index.bin` — serialized `OnDiskGraphIndex` with inline vectors (~380 MB)
+- `/app/labels.bin` — binary float array of fraud/legit labels (4-byte count + 4-byte floats)
 
 ## Endpoints
 
@@ -102,15 +112,12 @@ Minimal plain Java HTTP server with JVector-based fraud scoring.
 
 ### FraudScorer — JVector KNN
 
-- **Reference dataset**: `src/main/resources/references.json` — ~3 M records, format `{"vector": [float×14], "label": "legit"|"fraud"}`.
-- **Fallback**: if the resource is missing, 80 synthetic labeled vectors (8 prototypes × 5 variations, seed 42) are used instead.
-- **Index**: HNSW graph via `GraphIndexBuilder` (M=16, efConstruction=100, EUCLIDEAN similarity), built once at startup and held in memory.
-- **Inference**: `ThreadLocal<GraphSearcher>` — one searcher per virtual thread. Searches top-5 neighbours; `fraud_score = count(label=="fraud") / 5`.
+- **Reference dataset**: `references.json.gz` (project root, ~48 MB) — ~3 M records, format `{"vector": [float×14], "label": "legit"|"fraud"}`. Used only at build time by `IndexBuilder`.
+- **Index**: pre-built HNSW graph (`OnDiskGraphIndex`, M=16, efConstruction=100, EUCLIDEAN similarity), loaded at startup via mmap from `/app/index.bin`.
+- **Inference**: `ThreadLocal<GraphSearcher>` — one searcher per virtual thread, with RAVV obtained from `searcher.getView()`. Searches top-5 neighbours; `fraud_score = count(label=="fraud") / 5`.
 - **Test cases**: `src/test/resources/fraud-score-test-cases.json` — 50 recorded request/response pairs for regression testing.
 
 ### Normalization
-
-| # | Feature | Formula |
 
 | # | Feature | Formula |
 |---|---------|---------|

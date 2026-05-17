@@ -4,6 +4,14 @@ COPY pom.xml .
 COPY src ./src
 RUN mvn -q package -DskipTests
 
+FROM eclipse-temurin:26-jdk AS index-builder
+WORKDIR /app
+COPY --from=build /app/target/rinha-backend-2026-1.0-SNAPSHOT.jar app.jar
+COPY references.json.gz .
+RUN java --add-modules jdk.incubator.vector -Xmx2g \
+      -cp app.jar dev.denisarruda.rinha.IndexBuilder \
+      references.json.gz index.bin labels.bin
+
 FROM eclipse-temurin:26-jdk AS jlink
 COPY --from=build /app/target/rinha-backend-2026-1.0-SNAPSHOT.jar /app/app.jar
 RUN jdeps --ignore-missing-deps --print-module-deps /app/app.jar \
@@ -20,6 +28,9 @@ FROM debian:bookworm-slim
 RUN useradd --no-create-home --shell /bin/false app
 COPY --from=jlink /custom-jre /opt/java
 COPY --chown=app:app --from=build /app/target/rinha-backend-2026-1.0-SNAPSHOT.jar /app/app.jar
+COPY --chown=app:app --from=index-builder /app/index.bin /app/index.bin
+COPY --chown=app:app --from=index-builder /app/labels.bin /app/labels.bin
 USER app
 EXPOSE 8080
-ENTRYPOINT ["/opt/java/bin/java", "--add-modules", "jdk.incubator.vector", "-Xmx2g", "-cp", "/app/app.jar", "dev.denisarruda.rinha.Application"]
+ENTRYPOINT ["/opt/java/bin/java", "--add-modules", "jdk.incubator.vector", "--enable-preview", "-Xmx512m", \
+            "-cp", "/app/app.jar", "dev.denisarruda.rinha.Application"]
