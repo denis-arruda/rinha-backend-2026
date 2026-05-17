@@ -5,11 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Build
+# Build (produces fat jar via maven-shade-plugin)
 ./mvnw package -DskipTests
 
-# Run locally (after build)
-java -cp target/rinha-backend-2026-1.0-SNAPSHOT.jar dev.denisarruda.rinha.Application
+# Run locally (after build) — 2 GB heap required for the reference dataset
+java --add-modules jdk.incubator.vector -Xmx2g \
+  -cp target/rinha-backend-2026-1.0-SNAPSHOT.jar dev.denisarruda.rinha.Application
 
 # Build Docker image
 # Use --platform linux/amd64 when building on non-amd64 machines (e.g. Apple Silicon)
@@ -21,12 +22,17 @@ docker compose up
 
 ## Architecture
 
-Minimal plain Java HTTP server — no frameworks, no external dependencies.
+Minimal plain Java HTTP server with JVector-based fraud scoring.
 
 - `HttpServer` (JDK built-in `com.sun.net.httpserver`) listens on port 8080.
 - Two instances (`api1`, `api2`) run behind **nginx** on port 9999, load-balanced via a round-robin upstream.
-- The Dockerfile is a three-stage build: Maven compiles the jar → `jlink` produces a custom JRE with only the required modules → `debian:bookworm-slim` runs the minimal image.
+- The Dockerfile is a three-stage build: Maven compiles the fat jar → `jlink` produces a custom JRE → `debian:bookworm-slim` runs the minimal image.
 - Java 26 (`maven.compiler.release=26`).
+- Dependencies: `io.github.jbellis:jvector:4.0.0-rc.8` (vector search), `slf4j-simple` (logging). Bundled via `maven-shade-plugin` into a single fat jar (~56 MB including the reference dataset).
+
+### Startup
+
+`FraudScorer.init()` is called in `Application.main()` **before** the HTTP server starts. It loads `src/main/resources/references.json` (~3 M labeled transaction vectors) and builds an in-memory JVector HNSW index. This takes ~3 minutes and requires ~2 GB heap. `/ready` only responds after this completes.
 
 ## Endpoints
 
@@ -92,7 +98,15 @@ Minimal plain Java HTTP server — no frameworks, no external dependencies.
 
 1. `FraudRequestParser.java` — parses the JSON body into a typed record.
 2. `Normalizer.java` — maps the record to a `float[14]` feature vector using constants from `NormalizationConstants.java`. `clamp(x)` keeps values in [0.0, 1.0].
-3. `FraudScorer.java` — receives the vector and returns a `float` fraud score in [0, 1]. `approved = score < 0.6`.
+3. `FraudScorer.java` — searches the JVector index for the 5 nearest neighbours (EUCLIDEAN) and returns `fraud_score = fraud_count / 5`. `approved = score < 0.6`.
+
+### FraudScorer — JVector KNN
+
+- **Reference dataset**: `src/main/resources/references.json` — ~3 M records, format `{"vector": [float×14], "label": "legit"|"fraud"}`.
+- **Fallback**: if the resource is missing, 80 synthetic labeled vectors (8 prototypes × 5 variations, seed 42) are used instead.
+- **Index**: HNSW graph via `GraphIndexBuilder` (M=16, efConstruction=100, EUCLIDEAN similarity), built once at startup and held in memory.
+- **Inference**: `ThreadLocal<GraphSearcher>` — one searcher per virtual thread. Searches top-5 neighbours; `fraud_score = count(label=="fraud") / 5`.
+- **Test cases**: `src/test/resources/fraud-score-test-cases.json` — 50 recorded request/response pairs for regression testing.
 
 ### Normalization
 
