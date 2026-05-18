@@ -32,5 +32,9 @@ COPY --chown=app:app --from=index-builder /app/index.bin /app/index.bin
 COPY --chown=app:app --from=index-builder /app/labels.bin /app/labels.bin
 USER app
 EXPOSE 8080
-ENTRYPOINT ["/opt/java/bin/java", "--add-modules", "jdk.incubator.vector", "--enable-preview", "-Xmx512m", \
+ENTRYPOINT ["/opt/java/bin/java", \
+            "--add-modules", "jdk.incubator.vector", "--enable-preview", \
+            "-XX:MaxRAMPercentage=75", "-XX:InitialRAMPercentage=50", \
+            "-XX:+UseZGC", "-XX:ConcGCThreads=1", \
+            "-XX:+AlwaysPreTouch", "-Xss256k", \
             "-cp", "/app/app.jar", "dev.denisarruda.rinha.Application"]
